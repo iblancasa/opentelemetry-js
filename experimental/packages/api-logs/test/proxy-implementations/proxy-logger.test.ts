@@ -92,6 +92,7 @@ describe('ProxyLogger', () => {
         emit() {
           emitCalled = true;
         },
+        recordException() {},
       };
 
       logger = provider.getLogger('test');

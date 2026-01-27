@@ -9,6 +9,7 @@ These examples are using work in progress metrics packages.
 | Name                      | Description                                                                      | Complexity Level |
 | ------------------------- | -------------------------------------------------------------------------------- | ---------------- |
 | [prometheus](prometheus/) | Basic Metric use with Prometheus (`@opentelemetry/exporter-prometheus`) Exporter | Beginner         |
+| [logs-exceptions](logs-exceptions/) | Manual exception logs plus uncaught exception handling with the Node SDK | Beginner |
 
 ## Contributing
 

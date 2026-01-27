@@ -16,9 +16,13 @@
 
 import { Logger } from './types/Logger';
 import { LogRecord } from './types/LogRecord';
+import { RecordExceptionOptions } from './types/RecordExceptionOptions';
+import type { Exception } from '@opentelemetry/api';
 
 export class NoopLogger implements Logger {
   emit(_logRecord: LogRecord): void {}
+
+  recordException(_exception: Exception, _options?: RecordExceptionOptions): void {}
 }
 
 export const NOOP_LOGGER = new NoopLogger();

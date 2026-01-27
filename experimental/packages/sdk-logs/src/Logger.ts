@@ -19,14 +19,51 @@ import { SeverityNumber } from '@opentelemetry/api-logs';
 import type { InstrumentationScope } from '@opentelemetry/core';
 import {
   context,
+  diag,
   trace,
   TraceFlags,
   isSpanContextValid,
 } from '@opentelemetry/api';
+import type { Exception } from '@opentelemetry/api';
+import {
+  ATTR_EXCEPTION_MESSAGE,
+  ATTR_EXCEPTION_STACKTRACE,
+  ATTR_EXCEPTION_TYPE,
+} from '@opentelemetry/semantic-conventions';
 
 import { LogRecordImpl } from './LogRecordImpl';
 import { LoggerProviderSharedState } from './internal/LoggerProviderSharedState';
 import { LoggerConfig } from './types';
+
+const defaultSeverity = SeverityNumber.ERROR;
+
+function exceptionToLogAttributes(
+  exception: Exception
+): logsAPI.LogAttributes | undefined {
+  const attributes: logsAPI.LogAttributes = {};
+  if (typeof exception === 'string') {
+    attributes[ATTR_EXCEPTION_MESSAGE] = exception;
+  } else if (exception) {
+    if ('code' in exception && exception.code != null) {
+      attributes[ATTR_EXCEPTION_TYPE] = exception.code.toString();
+    } else if ('name' in exception && exception.name) {
+      attributes[ATTR_EXCEPTION_TYPE] = exception.name;
+    }
+    if ('message' in exception && exception.message) {
+      attributes[ATTR_EXCEPTION_MESSAGE] = exception.message;
+    }
+    if ('stack' in exception && exception.stack) {
+      attributes[ATTR_EXCEPTION_STACKTRACE] = exception.stack;
+    }
+  }
+
+  if (attributes[ATTR_EXCEPTION_TYPE] || attributes[ATTR_EXCEPTION_MESSAGE]) {
+    return attributes;
+  }
+
+  diag.warn(`Failed to record an exception ${exception}`);
+  return undefined;
+}
 
 export class Logger implements logsAPI.Logger {
   public readonly instrumentationScope: InstrumentationScope;
@@ -107,5 +144,25 @@ export class Logger implements logsAPI.Logger {
      * If logRecord is needed after OnEmit returns (i.e. for asynchronous processing) only reads are permitted.
      */
     logRecordInstance._makeReadonly();
+  }
+
+  public recordException(
+    exception: Exception,
+    options: logsAPI.RecordExceptionOptions = {}
+  ): void {
+    const exceptionAttributes = exceptionToLogAttributes(exception);
+    if (!exceptionAttributes) {
+      return;
+    }
+
+    const { attributes, severityNumber, ...rest } = options;
+    this.emit({
+      ...rest,
+      severityNumber: severityNumber ?? defaultSeverity,
+      attributes: {
+        ...(attributes ?? {}),
+        ...exceptionAttributes,
+      },
+    });
   }
 }

@@ -28,6 +28,12 @@ import { Logger } from '../../src/Logger';
 import { InMemoryLogRecordExporter } from '../../src/export/InMemoryLogRecordExporter';
 import { SimpleLogRecordProcessor } from '../../src/export/SimpleLogRecordProcessor';
 import { LoggerProviderSharedState } from '../../src/internal/LoggerProviderSharedState';
+import {
+  ATTR_EXCEPTION_MESSAGE,
+  ATTR_EXCEPTION_STACKTRACE,
+  ATTR_EXCEPTION_TYPE,
+} from '@opentelemetry/semantic-conventions';
+import type { Exception } from '@opentelemetry/api';
 
 const setup = () => {
   const logProcessor = new NoopLogRecordProcessor();
@@ -474,6 +480,73 @@ describe('Logger', () => {
         assert.strictEqual(logRecords.length, 1);
         assert.strictEqual(logRecords[0].body, 'sampled warn');
       });
+    });
+  });
+
+  describe('recordException', () => {
+    it('should emit a log record with exception attributes', () => {
+      const exporter = new InMemoryLogRecordExporter();
+      const loggerProvider = new LoggerProvider({
+        processors: [new SimpleLogRecordProcessor(exporter)],
+      });
+      const logger = loggerProvider.getLogger('test-logger') as Logger;
+      const error = new Error('boom');
+
+      logger.recordException(error);
+
+      const logRecords = exporter.getFinishedLogRecords();
+      assert.strictEqual(logRecords.length, 1);
+      assert.strictEqual(
+        logRecords[0].severityNumber,
+        SeverityNumber.ERROR
+      );
+      assert.strictEqual(
+        logRecords[0].attributes[ATTR_EXCEPTION_MESSAGE],
+        'boom'
+      );
+      assert.strictEqual(
+        logRecords[0].attributes[ATTR_EXCEPTION_TYPE],
+        'Error'
+      );
+      assert.ok(logRecords[0].attributes[ATTR_EXCEPTION_STACKTRACE]);
+    });
+
+    it('should merge exception attributes with additional attributes', () => {
+      const exporter = new InMemoryLogRecordExporter();
+      const loggerProvider = new LoggerProvider({
+        processors: [new SimpleLogRecordProcessor(exporter)],
+      });
+      const logger = loggerProvider.getLogger('test-logger') as Logger;
+
+      logger.recordException('boom', {
+        severityNumber: SeverityNumber.FATAL,
+        attributes: { 'error.kind': 'manual' },
+      });
+
+      const logRecords = exporter.getFinishedLogRecords();
+      assert.strictEqual(logRecords.length, 1);
+      assert.strictEqual(
+        logRecords[0].severityNumber,
+        SeverityNumber.FATAL
+      );
+      assert.strictEqual(
+        logRecords[0].attributes[ATTR_EXCEPTION_MESSAGE],
+        'boom'
+      );
+      assert.strictEqual(logRecords[0].attributes['error.kind'], 'manual');
+    });
+
+    it('should drop exceptions without message or type', () => {
+      const exporter = new InMemoryLogRecordExporter();
+      const loggerProvider = new LoggerProvider({
+        processors: [new SimpleLogRecordProcessor(exporter)],
+      });
+      const logger = loggerProvider.getLogger('test-logger') as Logger;
+
+      logger.recordException({} as Exception);
+
+      const logRecords = exporter.getFinishedLogRecords();
+      assert.strictEqual(logRecords.length, 0);
     });
   });
 });

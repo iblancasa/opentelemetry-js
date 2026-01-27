@@ -14,8 +14,15 @@
  * limitations under the License.
  */
 
-import { metrics, trace, diag, DiagConsoleLogger } from '@opentelemetry/api';
-import { logs } from '@opentelemetry/api-logs';
+import {
+  context,
+  metrics,
+  trace,
+  diag,
+  DiagConsoleLogger,
+} from '@opentelemetry/api';
+import type { Exception } from '@opentelemetry/api';
+import { logs, SeverityNumber } from '@opentelemetry/api-logs';
 import {
   Instrumentation,
   registerInstrumentations,
@@ -59,7 +66,7 @@ import {
   NodeTracerProvider,
 } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
-import { NodeSDKConfiguration } from './types';
+import { ExceptionHandlerConfig, NodeSDKConfiguration } from './types';
 import {
   getBooleanFromEnv,
   getStringFromEnv,
@@ -180,6 +187,9 @@ export class NodeSDK {
   private _configuration?: Partial<NodeSDKConfiguration>;
 
   private _disabled?: boolean;
+  private _exceptionHandlerConfig?: ExceptionHandlerConfig;
+  private _uncaughtExceptionListener?: (error: Error) => void;
+  private _unhandledRejectionListener?: (reason: unknown) => void;
 
   /**
    * Create a new NodeJS SDK instance
@@ -199,6 +209,7 @@ export class NodeSDK {
     }
 
     this._configuration = configuration;
+    this._exceptionHandlerConfig = configuration.exceptionHandler;
 
     this._resource = configuration.resource ?? defaultResource();
     this._autoDetectResources = configuration.autoDetectResources ?? true;
@@ -350,6 +361,8 @@ export class NodeSDK {
       logs.setGlobalLoggerProvider(loggerProvider);
     }
 
+    this._registerExceptionHandlers();
+
     if (
       this._meterProviderConfig?.readers &&
       // only register if there is a reader, otherwise we waste compute/memory.
@@ -374,6 +387,7 @@ export class NodeSDK {
   }
 
   public shutdown(): Promise<void> {
+    this._deregisterExceptionHandlers();
     const promises: Promise<unknown>[] = [];
     if (this._tracerProvider) {
       promises.push(this._tracerProvider.shutdown());
@@ -389,6 +403,107 @@ export class NodeSDK {
       Promise.all(promises)
         // return void instead of the array from Promise.all
         .then(() => {})
+    );
+  }
+
+  private _registerExceptionHandlers(): void {
+    const config = this._exceptionHandlerConfig;
+    if (!config || config.enabled === false) {
+      return;
+    }
+
+    const {
+      captureUncaughtException = true,
+      captureUnhandledRejection = true,
+      exitOnUncaughtException = true,
+      exitOnUnhandledRejection = false,
+    } = config;
+
+    const logger = logs.getLogger('@opentelemetry/sdk-node');
+
+    if (captureUncaughtException && !this._uncaughtExceptionListener) {
+      this._uncaughtExceptionListener = error => {
+        this._handleProcessException(
+          'uncaughtException',
+          error,
+          logger,
+          SeverityNumber.FATAL,
+          exitOnUncaughtException
+        );
+      };
+      process.on('uncaughtException', this._uncaughtExceptionListener);
+    }
+
+    if (captureUnhandledRejection && !this._unhandledRejectionListener) {
+      this._unhandledRejectionListener = reason => {
+        this._handleProcessException(
+          'unhandledRejection',
+          reason,
+          logger,
+          SeverityNumber.ERROR,
+          exitOnUnhandledRejection
+        );
+      };
+      process.on('unhandledRejection', this._unhandledRejectionListener);
+    }
+  }
+
+  private _deregisterExceptionHandlers(): void {
+    if (this._uncaughtExceptionListener) {
+      process.removeListener('uncaughtException', this._uncaughtExceptionListener);
+      this._uncaughtExceptionListener = undefined;
+    }
+    if (this._unhandledRejectionListener) {
+      process.removeListener(
+        'unhandledRejection',
+        this._unhandledRejectionListener
+      );
+      this._unhandledRejectionListener = undefined;
+    }
+  }
+
+  private _handleProcessException(
+    origin: 'uncaughtException' | 'unhandledRejection',
+    reason: unknown,
+    logger: ReturnType<typeof logs.getLogger>,
+    severityNumber: SeverityNumber,
+    shouldExit: boolean
+  ): void {
+    const exception = normalizeException(reason);
+    logger.recordException(exception, { severityNumber, eventName: origin });
+
+    const activeSpan = trace.getSpan(context.active());
+    if (activeSpan) {
+      activeSpan.recordException(exception);
+    }
+
+    void this._forceFlush().finally(() => {
+      if (!shouldExit) {
+        return;
+      }
+      process.exitCode = 1;
+      process.exit(1);
+    });
+  }
+
+  private async _forceFlush(): Promise<void> {
+    const promises: Promise<unknown>[] = [];
+    if (this._tracerProvider) {
+      promises.push(this._tracerProvider.forceFlush());
+    }
+    if (this._loggerProvider) {
+      promises.push(this._loggerProvider.forceFlush());
+    }
+    if (this._meterProvider) {
+      promises.push(this._meterProvider.forceFlush());
+    }
+
+    await Promise.all(
+      promises.map(promise =>
+        promise.catch(error => {
+          diag.error('Failed to flush telemetry on exception', error as Error);
+        })
+      )
     );
   }
 
@@ -456,4 +571,24 @@ export class NodeSDK {
       };
     }
   }
+}
+
+function normalizeException(reason: unknown): Exception {
+  if (reason instanceof Error) {
+    return reason;
+  }
+
+  if (typeof reason === 'string') {
+    return reason;
+  }
+
+  if (reason && typeof reason === 'object') {
+    try {
+      return JSON.stringify(reason);
+    } catch {
+      return String(reason);
+    }
+  }
+
+  return String(reason);
 }

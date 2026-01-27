@@ -32,5 +32,5 @@ export * as tracing from '@opentelemetry/sdk-trace-base';
 
 export { NodeSDK } from './sdk';
 export type { LoggerProviderConfig, MeterProviderConfig } from './sdk';
-export type { NodeSDKConfiguration } from './types';
+export type { ExceptionHandlerConfig, NodeSDKConfiguration } from './types';
 export { startNodeSDK } from './start';

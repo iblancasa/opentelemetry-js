@@ -18,6 +18,8 @@ import { NOOP_LOGGER } from './NoopLogger';
 import { Logger } from './types/Logger';
 import { LoggerOptions } from './types/LoggerOptions';
 import { LogRecord } from './types/LogRecord';
+import type { Exception } from '@opentelemetry/api';
+import { RecordExceptionOptions } from './types/RecordExceptionOptions';
 
 export class ProxyLogger implements Logger {
   // When a real implementation is provided, this will be it
@@ -46,6 +48,10 @@ export class ProxyLogger implements Logger {
    */
   emit(logRecord: LogRecord): void {
     this._getLogger().emit(logRecord);
+  }
+
+  recordException(exception: Exception, options?: RecordExceptionOptions): void {
+    this._getLogger().recordException(exception, options);
   }
 
   /**

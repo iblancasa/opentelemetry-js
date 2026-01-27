@@ -50,6 +50,7 @@ export interface NodeSDKConfiguration {
   traceExporter: SpanExporter;
   spanLimits: SpanLimits;
   idGenerator: IdGenerator;
+  exceptionHandler?: ExceptionHandlerConfig;
 }
 /**
  * @experimental Options for new experimental SDK setup
@@ -57,4 +58,31 @@ export interface NodeSDKConfiguration {
 export interface SDKOptions {
   instrumentations?: (Instrumentation | Instrumentation[])[];
   textMapPropagator?: TextMapPropagator | null;
+}
+
+export interface ExceptionHandlerConfig {
+  /**
+   * Enables process-level exception handlers for uncaught exceptions and unhandled rejections.
+   */
+  enabled?: boolean;
+
+  /**
+   * Capture uncaught exceptions.
+   */
+  captureUncaughtException?: boolean;
+
+  /**
+   * Capture unhandled promise rejections.
+   */
+  captureUnhandledRejection?: boolean;
+
+  /**
+   * Exit the process after capturing an uncaught exception.
+   */
+  exitOnUncaughtException?: boolean;
+
+  /**
+   * Exit the process after capturing an unhandled rejection.
+   */
+  exitOnUnhandledRejection?: boolean;
 }

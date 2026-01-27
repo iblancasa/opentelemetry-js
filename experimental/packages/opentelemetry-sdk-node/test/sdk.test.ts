@@ -81,6 +81,10 @@ import { OTLPTraceExporter as OTLPGrpcTraceExporter } from '@opentelemetry/expor
 import { ZipkinExporter } from '@opentelemetry/exporter-zipkin';
 
 import { ATTR_HOST_NAME, ATTR_PROCESS_PID } from './semconv';
+import {
+  ATTR_EXCEPTION_MESSAGE,
+  ATTR_EXCEPTION_TYPE,
+} from '@opentelemetry/semantic-conventions';
 
 function assertDefaultContextManagerRegistered() {
   assert.ok(
@@ -582,6 +586,44 @@ describe('Node SDK', () => {
       sdk.start();
 
       assert.deepStrictEqual(propagation.fields(), []);
+
+      await sdk.shutdown();
+    });
+  });
+
+  describe('Exception handling', () => {
+    it('should capture unhandled rejections as log records', async () => {
+      const exporter = new InMemoryLogRecordExporter();
+      const sdk = new NodeSDK({
+        autoDetectResources: false,
+        logRecordProcessors: [new SimpleLogRecordProcessor(exporter)],
+        exceptionHandler: {
+          enabled: true,
+          exitOnUnhandledRejection: false,
+          exitOnUncaughtException: false,
+        },
+      });
+
+      sdk.start();
+
+      const error = new Error('boom');
+      (process as NodeJS.EventEmitter).emit('unhandledRejection', error);
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const logRecords = exporter.getFinishedLogRecords();
+      const rejectionRecord = logRecords.find(
+        record => record.eventName === 'unhandledRejection'
+      );
+      assert.ok(rejectionRecord);
+      assert.strictEqual(
+        rejectionRecord.attributes[ATTR_EXCEPTION_MESSAGE],
+        'boom'
+      );
+      assert.strictEqual(
+        rejectionRecord.attributes[ATTR_EXCEPTION_TYPE],
+        'Error'
+      );
 
       await sdk.shutdown();
     });
